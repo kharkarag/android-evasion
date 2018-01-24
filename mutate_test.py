@@ -3,7 +3,7 @@ import contextlib
 import subprocess
 import copy
 import logging
-from util import *
+from util.util import *
 from lib import liblinearutil
 
 model = liblinearutil.load_model("Marvin/models/model_all_liblinear-L2")

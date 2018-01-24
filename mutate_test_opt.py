@@ -3,7 +3,7 @@ import contextlib
 import subprocess
 import copy
 import logging
-from util import *
+from util.util import *
 from lib import liblinearutil
 
 def init():
@@ -104,7 +104,7 @@ def mutate(model_file, malicious_file, evasive_output):
 
     evasive_file.close()
     print("------------------------------")
-    subprocess.run(["./postprocess.sh", "assisted_mutation"])
+    subprocess.run(["./util/postprocess.sh", "assisted_mutation"])
     print("------------------------------")
 
 if __name__ == '__main__':

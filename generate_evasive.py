@@ -4,7 +4,7 @@ import subprocess
 import copy
 import logging
 import random
-from util import *
+from util.util import *
 from lib import liblinearutil
 
 # start_feat = int(sys.argv[1])
@@ -104,7 +104,7 @@ def mutate(malicious_file, benign_file, evasive_output):
 
     evasive_file.close()
     print("------------------------------")
-    subprocess.run("./postprocess.sh")
+    subprocess.run("./util/postprocess.sh")
     print("------------------------------")
 
 if __name__ == '__main__':
