@@ -1,2 +1,2 @@
 #!/bin/bash
-rm logs/generator/*
+rm output/logs/generator/*

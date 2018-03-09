@@ -7,22 +7,20 @@ import random
 from util.util import *
 from lib import liblinearutil
 
-# start_feat = int(sys.argv[1])
-# end_feat = int(sys.argv[2])
+def init():
+    std_logger = logging.getLogger("standard_logger")
+    std_logger.setLevel(logging.DEBUG)
+    std_fh = logging.FileHandler("output/logs/master.log")
+    std_fh.setLevel(logging.DEBUG)
+    std_logger.addHandler(std_fh)
 
-model = liblinearutil.load_model("Marvin/models/model_all_liblinear-L2")
+    feature_logger = logging.getLogger("feature_logger")
+    feature_logger.setLevel(logging.DEBUG)
+    feature_fh = logging.FileHandler("output/logs/features.log", mode="w")
+    feature_fh.setLevel(logging.DEBUG)
+    feature_logger.addHandler(feature_fh)
 
-std_logger = logging.getLogger("standard_logger")
-std_logger.setLevel(logging.DEBUG)
-std_fh = logging.FileHandler("logs/generator/master.log")
-std_fh.setLevel(logging.DEBUG)
-std_logger.addHandler(std_fh)
-
-feature_logger = logging.getLogger("feature_logger")
-feature_logger.setLevel(logging.DEBUG)
-feature_fh = logging.FileHandler("logs/generator/features.log")
-feature_fh.setLevel(logging.DEBUG)
-feature_logger.addHandler(feature_fh)
+    return std_logger, feature_logger
 
 class DummyFile(object):
     def flush(self): pass
@@ -35,14 +33,14 @@ def nostdout():
     yield
     sys.stdout = save_stdout
 
-def mutate(malicious_file, benign_file, evasive_output):
+def mutate(model_file, malicious_file, benign_file, evasive_output):
+    (std_logger, feature_logger) = init()
+    model = liblinearutil.load_model(model_file)
+
     with open(benign_file, "r") as f:
         benign_samples = f.readlines()
     benign_sample_size = len(benign_samples)
-
     print("------------------------------")
-    # print("Total features: " + str(len(benign.features.keys())))
-    # print("------------------------------")
 
     with open(malicious_file, "r") as f:
         malicious_samples = f.readlines()
@@ -65,7 +63,7 @@ def mutate(malicious_file, benign_file, evasive_output):
         std_logger.debug("------------------------------")
         # print("------------------------------")
         std_logger.info(malicious_orig.stringify())
-        for i in range(15):
+        for i in range(50):
 
             mutation_list = []
             mutation_labels = []
@@ -77,11 +75,11 @@ def mutate(malicious_file, benign_file, evasive_output):
                 mutation_labels.append(malicious.label)
 
                 malicious = copy.deepcopy(malicious_orig)
-
+            
             with nostdout():
                 p_labs, p_acc, p_vals = liblinearutil.predict(mutation_labels, mutation_list, model, '-b 1')
 
-            best_feat_index, best_probs = min(enumerate(p_vals), key=lambda vals: vals[1][0])
+            best_feat_index, best_probs = min(enumerate(p_vals), key=lambda vals: vals[1][1])
             best_feat = benign_list[best_feat_index]
 
             # print("Feat: " + str(best_feat) + ", prob: " + str(best_probs))
@@ -90,13 +88,13 @@ def mutate(malicious_file, benign_file, evasive_output):
             malicious_orig.features[best_feat] = 1
             malicious = copy.deepcopy(malicious_orig)
 
-            if best_probs[0] < 0.5:
+            if best_probs[1] < 0.5:
                 std_logger.warning("Success | Final: " + str(best_probs[0]) + " | Mutations: " + str(i+1))
                 evasive_file.write(malicious.sparse_arff())
                 break
                 # print("Success - final prob: " + str(best_probs[0]))
 
-        if best_probs[0] > 0.5:
+        if best_probs[1] > 0.5:
             std_logger.warning("Failure | Final prob: " + str(best_probs[0]))
 
         if sample_num % int(malicious_sample_size/20) == 0:
@@ -104,9 +102,9 @@ def mutate(malicious_file, benign_file, evasive_output):
 
     evasive_file.close()
     print("------------------------------")
-    subprocess.run("./util/postprocess.sh")
+    subprocess.run(["./util/postprocess.sh", "assisted_mutation"])
     print("------------------------------")
 
 if __name__ == '__main__':
     random.seed(10001)
-    mutate(sys.argv[1], sys.argv[2], sys.argv[3])
+    mutate(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])

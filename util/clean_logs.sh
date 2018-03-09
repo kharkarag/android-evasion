@@ -1,3 +1,3 @@
 #!/bin/bash
-rm logs/master.log
-rm logs/features.log
+rm output/logs/master.log
+rm output/logs/features.log

@@ -7,18 +7,15 @@ from util.util import *
 from lib import liblinearutil
 
 def init():
-    # model = liblinearutil.load_model("Marvin/models/model_all_liblinear-L2")
-    # model = liblinearutil.load_model("train/25.0%.model")
-
     std_logger = logging.getLogger("standard_logger")
     std_logger.setLevel(logging.DEBUG)
-    std_fh = logging.FileHandler("logs/master.log")
+    std_fh = logging.FileHandler("output/logs/master.log")
     std_fh.setLevel(logging.DEBUG)
     std_logger.addHandler(std_fh)
 
     feature_logger = logging.getLogger("feature_logger")
     feature_logger.setLevel(logging.DEBUG)
-    feature_fh = logging.FileHandler("logs/features.log", mode="w")
+    feature_fh = logging.FileHandler("output/logs/features.log", mode="w")
     feature_fh.setLevel(logging.DEBUG)
     feature_logger.addHandler(feature_fh)
 
@@ -39,9 +36,9 @@ def mutate(model_file, malicious_file, evasive_output):
     (std_logger, feature_logger) = init()
     model = liblinearutil.load_model(model_file)
     
-    with open("seeds/benign1.seed", "r") as f:
+    with open("seeds/training_1.benign", "r") as f:
         benign = load_record(f.read())
-    del benign.features[1]
+
     print("------------------------------")
     print("Total features: " + str(len(benign.features.keys())))
     print("------------------------------")
@@ -81,7 +78,7 @@ def mutate(model_file, malicious_file, evasive_output):
             with nostdout():
                 p_labs, p_acc, p_vals = liblinearutil.predict(mutation_labels, mutation_list, model, '-b 1')
 
-            best_feat_index, best_probs = min(enumerate(p_vals), key=lambda vals: vals[1][0])
+            best_feat_index, best_probs = min(enumerate(p_vals), key=lambda vals: vals[1][1])
             best_feat = benign_list[best_feat_index]
 
             # print("Feat: " + str(best_feat) + ", prob: " + str(best_probs))
@@ -90,13 +87,13 @@ def mutate(model_file, malicious_file, evasive_output):
             malicious_orig.features[best_feat] = 1
             malicious = copy.deepcopy(malicious_orig)
 
-            if best_probs[0] < 0.5:
+            if best_probs[1] < 0.5:
                 std_logger.warning("Success | Final: " + str(best_probs[0]) + " | Mutations: " + str(i+1))
                 evasive_file.write(malicious.sparse_arff())
                 break
                 # print("Success - final prob: " + str(best_probs[0]))
 
-        if best_probs[0] > 0.5:
+        if best_probs[1] > 0.5:
             std_logger.warning("Failure | Final prob: " + str(best_probs[0]))
 
         if malicious_sample_size > 20 and sample_num % int(malicious_sample_size/20) == 0:
