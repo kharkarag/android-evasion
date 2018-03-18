@@ -1,6 +1,7 @@
 import numpy as np
+import sys
 
-with open("output/logs/gp_features.log", "r") as f:
+with open(sys.argv[1], "r") as f:
     features = f.readlines()
 
 with open("Marvin/features/featurenames", "r") as f:

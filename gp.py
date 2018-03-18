@@ -5,6 +5,9 @@ import sys
 import logging
 import subprocess
 import copy
+import math
+import numpy as np
+from multiprocessing import Pool
 from util import util
 from lib import liblinearutil
 
@@ -14,34 +17,31 @@ benign_pool = list()
 benign_pool_file = "seeds/training_all.benign"
 benign_pool_size = 0
 
-seeds = list()
 # seed_file = "seeds/testing_1.seeds"
+# seed_file = "seeds/testing_10.seeds"
 seed_file = "seeds/testing_500.seeds"
 model_name = "Marvin/models/model_all_liblinear-L2"
 
 mutation_rate = 0.5
-max_feature_num = 534000 #TODO: verify
-
 number_unfit = int(sample_size*mutation_rate)
 
-std_logger, feature_logger = None, None
+header = "500_"
 
 def setup_logger(name):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
     fh = logging.FileHandler("output/logs/" + name + ".log")
     fh.setLevel(logging.DEBUG)
-    logger.addHandler(std_fh)
-
+    logger.addHandler(fh)
     return logger
 
+std_logger = setup_logger("gp/" + header + "master")
+feature_logger = setup_logger("gp/" + header + "features")
+evasion_logger = setup_logger("gp/" + header+ "evasive")
+
 def init():
-    global benign_pool, benign_pool_size, model, std_logger, feature_logger
+    global benign_pool, benign_pool_size, model
     print("Initializing...")
-
-    std_logger = setup_logger("gp")
-    feature_logger = setup_logger("gp_features")
-
     random.seed(1)
     model = liblinearutil.load_model(model_name)
 
@@ -73,9 +73,12 @@ def nostdout():
 
 class Experiment:
 
-    generation = list()
-    min_score = 0.0
-    best_cumulative_extra = list()
+    def __init__(self):
+        self.generation = list()
+        self.generation.clear()
+        self.min_score = 1.0
+        self.best_cumulative_extra = list()
+        self.best_cumulative_extra.clear()
 
     def reset_generation(self, seed):
         self.generation = list()
@@ -85,12 +88,6 @@ class Experiment:
         seed.score = p_vals[0][1]
 
         self.best_cumulative_extra = [seed] * sample_size
-
-        # for i in range(sample_size):
-        #     sample = self.mutate_single(seed)
-        #     self.generation.append(sample)
-        #     logging.debug(sample.stringify())
-        # logging.info("Set working set for seed")
 
     def evaluate_fitness(self, samples, fitness_rate):
         # Sort samples by maliciousness
@@ -112,16 +109,15 @@ class Experiment:
     def mutate_single(self, sample):
         global benign_pool
         new_sample = copy.deepcopy(sample)
-        # new_feature_index = random.randrange(2, max_feature_num)
-        # new_sample.features[new_feature_index] = 1
 
         benign_sample = random.choice(benign_pool)
 
-        added_features = random.randrange(len(benign_sample.features.keys()))
-        new_sample.added_feat += added_features
-        for added_feat in range(added_features):
-            new_feature = random.choice(list(benign_sample.features.keys())[1:])
+        # num_added_features = random.randrange(len(benign_sample.features.keys()))
+        num_added_features = int(random.expovariate(1/math.log(len(benign_sample.features.keys()))))
+        for i in range(num_added_features):
+            new_feature = random.choice(list(benign_sample.features.keys()))
             new_sample.features[new_feature] = 1
+            new_sample.added_feat[new_feature] = 1
             feature_logger.info(new_feature)
 
         return new_sample
@@ -139,9 +135,6 @@ class Experiment:
         # Run model
         generation_input = [sample.features for sample in samples]
         generation_labels = [sample.label for sample in samples]
-
-        # print(generation_input[0])
-        # print(generation_labels[0])
 
         with nostdout():
             p_labs, p_acc, p_vals = liblinearutil.predict(generation_labels, generation_input, model, '-b 1')
@@ -169,7 +162,6 @@ class Experiment:
 
         for i in range(sample_size):
             self.generation.append(self.mutate_single(seed))
-        # batch_fitness = self.classify(self.generation)
         self.generation = self.classify(self.generation)
 
         # While evasion performance not good enough or reached max_gen
@@ -179,7 +171,7 @@ class Experiment:
             self.mutate_set(self.generation)
 
             num_evaded = sum([member.score < 0.5 for member in self.generation])
-            std_logger.info("Generation complete | Evaded: " + str(num_evaded) + " Mutations: " + str(self.generation[0].added_feat))
+            std_logger.info("Generation complete | Evaded: " + str(num_evaded) + " Mutations: " + str(len(self.generation[0].added_feat.keys())))
 
             # if (current_gen+1) % 5 == 0:
             #     print([member.score for member in self.generation])
@@ -191,21 +183,30 @@ class Experiment:
             print("Experiment failed - max score: " + str(self.min_score))
         else:
             std_logger.warning("Experiment successful")
-            std_logger.info("Num features added: " + str(self.generation[0].added_feat))
+            std_logger.info("Num features added: " + str(len(self.generation[0].added_feat.keys())))
             print("Completed generation", str(current_gen+1), ":", sum([member.score < 0.5 for member in self.generation]))
+            for feat in self.generation[0].added_feat.keys():
+                evasion_logger.info(feat)
         # print([member.score for member in self.generation])
 
         return sum([member.score < 0.5 for member in self.generation])
 
+
+def experiment_set(seed):
+    (i, seed_string) = seed
+    std_logger.info(["----- RUNNING EXPERIMENT ", i, "-----"])
+    # print("Running experiment", str(i), "...")
+    exp = Experiment()
+    final_fitness = exp.run_experiment(util.load_seed(seed_string), 100)
+    # print("Experiment " + str(i) + ": " + str(final_fitness))
 
 if __name__ == "__main__":
     init()
     seed_strings = list()
     with open(seed_file, "r") as f:
         seed_strings = f.readlines()
-    for i, seed_string in enumerate(seed_strings):
-        std_logger.info(["----- RUNNING EXPERIMENT ", i, "-----"])
-        print("Running experiment", str(i), "...")
-        exp = Experiment()
-        final_fitness = exp.run_experiment(util.load_seed(seed_string), 100)
-        print("Experiment " + str(i) + ": " + str(final_fitness))
+
+    with Pool(8) as p:
+        p.map(experiment_set, enumerate(seed_strings))
+
+    

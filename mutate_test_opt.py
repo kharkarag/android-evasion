@@ -3,7 +3,7 @@ import contextlib
 import subprocess
 import copy
 import logging
-from util.util import *
+from util import util
 from lib import liblinearutil
 
 def init():
@@ -37,7 +37,7 @@ def mutate(model_file, malicious_file, evasive_output):
     model = liblinearutil.load_model(model_file)
     
     with open("seeds/training_1.benign", "r") as f:
-        benign = load_record(f.read())
+        benign = util.load_record(f.read())
 
     print("------------------------------")
     print("Total features: " + str(len(benign.features.keys())))
@@ -53,7 +53,7 @@ def mutate(model_file, malicious_file, evasive_output):
 
     for sample_num, malicious_sample in enumerate(malicious_samples):
 
-        malicious = load_record(malicious_sample)
+        malicious = util.load_seed(malicious_sample)
         malicious_orig = copy.deepcopy(malicious)
 
         best_probs = [1.0, 0.0]
