@@ -3,10 +3,8 @@ import re, string
 import contextlib
 import sys
 import logging
-import subprocess
 import copy
 import math
-import numpy as np
 from multiprocessing import Pool
 from util import util
 from lib import liblinearutil
@@ -14,18 +12,22 @@ from lib import liblinearutil
 sample_size = 40
 
 benign_pool = list()
-benign_pool_file = "seeds/training_all.benign"
+benign_pool_file = "seeds/marvin/training_all.benign"
 benign_pool_size = 0
 
-# seed_file = "seeds/testing_1.seeds"
-# seed_file = "seeds/testing_10.seeds"
-seed_file = "seeds/testing_500.seeds"
+# seed_file = "seeds/marvin/testing_1.seeds"
+# seed_file = "seeds/marvin/testing_10.seeds"
+seed_file = "seeds/marvin/testing_500.seeds"
 model_name = "Marvin/models/model_all_liblinear-L2"
 
 mutation_rate = 0.5
 number_unfit = int(sample_size*mutation_rate)
+lambd = 0.01
 
-header = "500_"
+perm_cost, static_cost, dynamic_cost = 0.1, 1, 100
+
+header = "weighted_"
+
 
 def setup_logger(name):
     logger = logging.getLogger(name)
@@ -35,9 +37,15 @@ def setup_logger(name):
     logger.addHandler(fh)
     return logger
 
+
 std_logger = setup_logger("gp/" + header + "master")
 feature_logger = setup_logger("gp/" + header + "features")
-evasion_logger = setup_logger("gp/" + header+ "evasive")
+evasion_logger = setup_logger("gp/" + header + "evasive")
+
+
+with open("Marvin/features/featurenames", "r") as f:
+    feature_names = f.readlines()
+
 
 def init():
     global benign_pool, benign_pool_size, model
@@ -50,19 +58,18 @@ def init():
     with open(benign_pool_file, "r") as f:
         population_samples = f.readlines()
     for sample in population_samples:
-        benign_pool.append(util.load_record(sample))
+        benign_pool.append(util.load_marvin(sample))
     benign_pool_size = len(benign_pool)
     std_logger.info("Loaded gene pool")
 
-    # Select intial generation
-    # generation_indices = random.sample(benign_pool_size, sample_size)
-    # for index in generation_indices:
-    #     generation.append(benign_pool[int(index)])
     print("Initialization complete")
+
 
 class DummyFile(object):
     def flush(self): pass
+
     def write(self, x): pass
+
 
 @contextlib.contextmanager
 def nostdout():
@@ -70,6 +77,7 @@ def nostdout():
     sys.stdout = DummyFile()
     yield
     sys.stdout = save_stdout
+
 
 class Experiment:
 
@@ -91,14 +99,14 @@ class Experiment:
 
     def evaluate_fitness(self, samples, fitness_rate):
         # Sort samples by maliciousness
-        samples.sort(key = lambda sample: sample.score)
+        samples.sort(key=lambda sample: sample.score)
 
         # Replace bottom (1-fitness_rate) with fresh samples
         new_sample_index = int(fitness_rate*sample_size)
         for index in range(new_sample_index, len(samples)):
             if samples[index].score < self.best_cumulative_extra[0].score:
                 self.best_cumulative_extra.append(samples[index])
-                self.best_cumulative_extra.sort(key = lambda sample: sample.score)
+                self.best_cumulative_extra.sort(key=lambda sample: sample.score)
                 del self.best_cumulative_extra[-1:]
             else:
                 samples[index] = self.best_cumulative_extra[0]
@@ -107,30 +115,57 @@ class Experiment:
         return samples
 
     def mutate_single(self, sample):
-        global benign_pool
+        global benign_pool, feature_names
         new_sample = copy.deepcopy(sample)
 
         benign_sample = random.choice(benign_pool)
 
         # num_added_features = random.randrange(len(benign_sample.features.keys()))
-        num_added_features = int(random.expovariate(1/math.log(len(benign_sample.features.keys()))))
+        # num_added_features = int(random.expovariate(1/math.log(len(benign_sample.features.keys()))))
+        num_added_features = 1
         for i in range(num_added_features):
             new_feature = random.choice(list(benign_sample.features.keys()))
+            feature_name = feature_names[new_feature]
+
+            iterations = 0
+            while feature_name[0] == "S":
+                new_feature = random.choice(list(benign_sample.features.keys()))
+                feature_name = feature_names[new_feature]
+                iterations += 1
+                if iterations > 10:
+                    benign_sample = random.choice(benign_pool)
+
             new_sample.features[new_feature] = 1
             new_sample.added_feat[new_feature] = 1
             feature_logger.info(new_feature)
+
+            # Assign feature cost
+
+            if "PermRequired" in feature_name:
+                new_sample.cost += perm_cost
+                new_sample.perm_added += 1
+            elif feature_name[0] == "S":
+                new_sample.cost += static_cost
+                new_sample.static_added += 1
+            elif feature_name[0] == "D":
+                new_sample.cost += dynamic_cost
+                new_sample.dynamic_added += 1
+
+            new_sample.fitness = new_sample.score
+            if len(new_sample.added_feat) > 0:
+                new_sample.fitness += lambd*(new_sample.cost/len(new_sample.added_feat))
 
         return new_sample
 
     def mutate_set(self, samples):
         mutation_set = random.sample(range(sample_size), number_unfit)
+        # mutation_set = range(sample_size - number_unfit, sample_size)
         for i in mutation_set:
             samples[i] = self.mutate_single(samples[i])
 
         return samples
 
     def classify(self, samples):
-        global min_score
 
         # Run model
         generation_input = [sample.features for sample in samples]
@@ -142,7 +177,7 @@ class Experiment:
         for i, val in enumerate(p_vals):
             samples[i].score = val[1]
 
-        samples.sort(key = lambda sample: sample.score)
+        samples.sort(key=lambda sample: sample.score)
 
         generation_best_score = samples[0].score
         if generation_best_score < self.min_score:
@@ -165,17 +200,22 @@ class Experiment:
         self.generation = self.classify(self.generation)
 
         # While evasion performance not good enough or reached max_gen
-        while current_gen < max_gen and self.generation[0].score > 0.5:  
+        while current_gen < max_gen and self.generation[0].score > 0.5:
+            self.mutate_set(self.generation)
             self.generation = self.classify(self.generation)
             self.generation = self.evaluate_fitness(self.generation, mutation_rate)
-            self.mutate_set(self.generation)
 
             num_evaded = sum([member.score < 0.5 for member in self.generation])
-            std_logger.info("Generation complete | Evaded: " + str(num_evaded) + " Mutations: " + str(len(self.generation[0].added_feat.keys())))
+            generation_string = "Generation complete |" \
+                + " Evaded: " + str(num_evaded) + " Mutations: " \
+                + str(len(self.generation[0].added_feat.keys()))
+            std_logger.info(generation_string)
 
-            # if (current_gen+1) % 5 == 0:
-            #     print([member.score for member in self.generation])
-                # print("Completed generation", str(current_gen+1), ":", sum([member.score < 0.5 for member in self.generation]))
+            # if (current_gen+1) % 1 == 0:
+                # print([(round(member.cost, 1), round(member.fitness, 2), len(member.added_feat), round(member.score, 2)) for member in self.generation])
+                # print()
+                # print("Completed generation", str(current_gen+1), ":",
+                #       sum([m.score < 0.5 for m in self.generation]))
             current_gen += 1
 
         if current_gen == max_gen:
@@ -184,7 +224,14 @@ class Experiment:
         else:
             std_logger.warning("Experiment successful")
             std_logger.info("Num features added: " + str(len(self.generation[0].added_feat.keys())))
-            print("Completed generation", str(current_gen+1), ":", sum([member.score < 0.5 for member in self.generation]))
+            print("Final generation",
+                  str(current_gen+1), ":",
+                  sum([member.score < 0.5 for member in self.generation]))
+            summary_string = "Feature types: " + str(self.generation[0].perm_added) \
+                             + " " + str(self.generation[0].static_added) \
+                             + " " + str(self.generation[0].dynamic_added)
+            std_logger.info(summary_string)
+            # print(self.generation[0].cost/len(self.generation[0].added_feat))
             for feat in self.generation[0].added_feat.keys():
                 evasion_logger.info(feat)
         # print([member.score for member in self.generation])
@@ -197,8 +244,9 @@ def experiment_set(seed):
     std_logger.info(["----- RUNNING EXPERIMENT ", i, "-----"])
     # print("Running experiment", str(i), "...")
     exp = Experiment()
-    final_fitness = exp.run_experiment(util.load_seed(seed_string), 100)
+    final_fitness = exp.run_experiment(util.load_seed(seed_string), 200)
     # print("Experiment " + str(i) + ": " + str(final_fitness))
+
 
 if __name__ == "__main__":
     init()
@@ -208,5 +256,3 @@ if __name__ == "__main__":
 
     with Pool(8) as p:
         p.map(experiment_set, enumerate(seed_strings))
-
-    

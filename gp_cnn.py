@@ -2,6 +2,7 @@ import random
 import re, string
 import contextlib
 import sys
+import os
 import logging
 import subprocess
 import copy
@@ -15,15 +16,13 @@ sample_size = 40
 
 random.seed(1)
 
-# seed_file = "seeds/testing_1.seeds"
-# seed_file = "seeds/testing_10.seeds"
-seed_file = "seeds/testing_500.seeds"
-model_name = "Marvin/models/model_all_liblinear-L2"
+seed_dir = "seeds/opseq_seeds/test/"
+eval_dir = "deep-android/eval/"
 
 mutation_rate = 0.5
 number_unfit = int(sample_size*mutation_rate)
 
-header = "500_"
+header = ""
 
 def setup_logger(name):
     logger = logging.getLogger(name)
@@ -33,9 +32,9 @@ def setup_logger(name):
     logger.addHandler(fh)
     return logger
 
-std_logger = setup_logger("gp/" + header + "master")
-feature_logger = setup_logger("gp/" + header + "features")
-evasion_logger = setup_logger("gp/" + header+ "evasive")
+std_logger = setup_logger("gp_cnn/" + header + "master")
+feature_logger = setup_logger("gp_cnn/" + header + "features")
+evasion_logger = setup_logger("gp_cnn/" + header+ "evasive")
 
 class DummyFile(object):
     def flush(self): pass
@@ -59,15 +58,32 @@ class Experiment:
 
 
     def evaluate(self):
-        # call lua script to run model on samples
+        for i, item in enumerate(self.generation):
+            with open(eval_dir + item.sample_id + "_" + str(i) + ".opseq", "w+") as f:
+                f.write(item.opcode_sequence())
+
+        # Call lua script to run model on samples
+        os.chdir('deep-android')
+        output = subprocess.check_output("th driver.lua -useCUDA -dataDir ./eval -modelPath ./model.th7", shell=True)
+        os.chdir('..')
+
+        output_list = list(filter(None, output.decode('UTF-8').split("\n")))
+        scores = output_list[1:-1]
+        score_split = [[float(score) for score in row.split()] for row in scores]
+        print(score_split)
+        # Each score is P(benign), P(malicious)
+
+        for i, score in enumerate(score_split):
+            # self.generation[i].score = 1 - score[0]/score[1]
+            self.generation[i].score = score[1]
+
+        return output
 
     def reset_generation(self, seed):
         self.generation = list()
+        self.generation.append(seed)
 
-        with nostdout():
-            p_labs, p_acc, p_vals = liblinearutil.predict([seed.label], [seed.features], model, '-b 1')
-        seed.score = p_vals[0][1]
-
+        seed.score = self.evaluate()
         self.best_cumulative_extra = [seed] * sample_size
 
     def evaluate_fitness(self, samples, fitness_rate):
@@ -88,18 +104,14 @@ class Experiment:
         return samples
 
     def mutate_single(self, sample):
-        global benign_pool
         new_sample = copy.deepcopy(sample)
+        num_features = len(new_sample.features)
 
-        benign_sample = random.choice(benign_pool)
+        num_added_nops = int(random.expovariate(1/math.log10(num_features)))
+        insertion_point = random.randrange(num_features + 1)
 
-        # num_added_features = random.randrange(len(benign_sample.features.keys()))
-        num_added_features = int(random.expovariate(1/math.log(len(benign_sample.features.keys()))))
-        for i in range(num_added_features):
-            new_feature = random.choice(list(benign_sample.features.keys()))
-            new_sample.features[new_feature] = 1
-            new_sample.added_feat[new_feature] = 1
-            feature_logger.info(new_feature)
+        new_sample.features[insertion_point:insertion_point] = [0] * num_added_nops
+        feature_logger.info(insertion_point)
 
         return new_sample
 
@@ -111,17 +123,11 @@ class Experiment:
         return samples
 
     def classify(self, samples):
-        global min_score
-
         # Run model
         generation_input = [sample.features for sample in samples]
         generation_labels = [sample.label for sample in samples]
 
-        with nostdout():
-            p_labs, p_acc, p_vals = liblinearutil.predict(generation_labels, generation_input, model, '-b 1')
-
-        for i, val in enumerate(p_vals):
-            samples[i].score = val[1]
+        self.evaluate()
 
         samples.sort(key = lambda sample: sample.score)
 
@@ -152,11 +158,12 @@ class Experiment:
             self.mutate_set(self.generation)
 
             num_evaded = sum([member.score < 0.5 for member in self.generation])
-            std_logger.info("Generation complete | Evaded: " + str(num_evaded) + " Mutations: " + str(len(self.generation[0].added_feat.keys())))
+            std_logger.info("Generation complete | Evaded: " + str(num_evaded) + " Mutations: " + str(len(self.generation[0].added_feat_indices)))
 
             # if (current_gen+1) % 5 == 0:
             #     print([member.score for member in self.generation])
                 # print("Completed generation", str(current_gen+1), ":", sum([member.score < 0.5 for member in self.generation]))
+            print("Generation", str(current_gen+1), self.generation[0].score)
             current_gen += 1
 
         if current_gen == max_gen:
@@ -164,9 +171,9 @@ class Experiment:
             print("Experiment failed - max score: " + str(self.min_score))
         else:
             std_logger.warning("Experiment successful")
-            std_logger.info("Num features added: " + str(len(self.generation[0].added_feat.keys())))
+            std_logger.info("Num features added: " + str(len(self.generation[0].added_feat_indices)))
             print("Completed generation", str(current_gen+1), ":", sum([member.score < 0.5 for member in self.generation]))
-            for feat in self.generation[0].added_feat.keys():
+            for feat in self.generation[0].added_feat_indices:
                 evasion_logger.info(feat)
         # print([member.score for member in self.generation])
 
@@ -174,17 +181,23 @@ class Experiment:
 
 
 def experiment_set(seed):
-    (i, seed_string) = seed
+    (i, seed_file) = seed
+    with open(seed_dir + seed_file, "r") as f:
+        opcodes = f.read().splitlines()
+
     std_logger.info(["----- RUNNING EXPERIMENT ", i, "-----"])
     exp = Experiment()
-    final_fitness = exp.run_experiment(util.load_seed(seed_string), 100)
+    final_fitness = exp.run_experiment(util.load_opseq(opcodes, 1, seed_file), 300)
     # print("Experiment " + str(i) + ": " + str(final_fitness))
 
 if __name__ == "__main__":
-    with open(seed_file, "r") as f:
-        seed_strings = f.readlines()
+    seed_files = []
+    for seed in os.listdir(seed_dir):
+        seed_files.append(seed)
 
-    with Pool(8) as p:
-        p.map(experiment_set, enumerate(seed_strings))
+    # with Pool(8) as p:
+    #     p.map(experiment_set, enumerate(seed_files))
+    for seed in seed_files:
+        experiment_set((0, seed))
 
     

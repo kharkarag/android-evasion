@@ -40,7 +40,7 @@ end
 savedModel.trainedModel:evaluate()
 
 --print('starting test')
-scores, testResult,confmat,time = testModel(allData,savedModel.trainedModel,savedModel.metaData.testInds,0)
+scores, testResult,confmat,time = testModel(allData,savedModel.trainedModel,0)
 
 --[[
 print('Results')

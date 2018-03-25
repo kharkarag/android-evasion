@@ -1,6 +1,6 @@
-function testModel(allData,model,valInds)
+function testModel(allData,model)
 
-	print('testing corrected verison 2')
+	--print('testing corrected verison 2')
 
 	local timerTest = torch.Timer()
 
@@ -14,11 +14,11 @@ function testModel(allData,model,valInds)
 	model:evaluate()
 	
 	-- push the validation data through the network
-	local nValPrograms = #valInds
+	local nValPrograms = #allData.label
 	local valError = 0
 	local correct = 0
 	local confmat = torch.zeros(2,2)
-	local scores = torch.zeros(nValPrograms)
+	local scores = torch.zeros(nValPrograms, 2)
 
 	-- We need to make sure the rare-class is regarded as positive
 	-- This means the f-score etc will be corectly calculated
@@ -26,7 +26,7 @@ function testModel(allData,model,valInds)
 	local nBenign = 0
 	local nMalware = 0
 	for k = 1,nValPrograms do
-		if allData.label[valInds[k]] == 1 then
+		if allData.label[k] == 1 then
 			nBenign = nBenign + 1
 		else
 			nMalware = nMalware + 1
@@ -43,11 +43,11 @@ function testModel(allData,model,valInds)
 	local valLabel = torch.zeros(1):type(dtype)
 
 	for k = 1,nValPrograms do
-		valLabel[{1}] = allData.label[valInds[k]]
-		--valBatch[{{1},{}}] = allData.program[valInds[k]]
+		valLabel[{1}] = allData.label[k]
+		--valBatch[{{1},{}}] = allData.program[k]
 
-		local currProgramPtr = allData.programStartPtrs[valInds[k]]
-		local currProgramLen = allData.programLengths[valInds[k]]
+		local currProgramPtr = allData.programStartPtrs[k]
+		local currProgramLen = allData.programLengths[k]
 
 		if currProgramLen > opt.maxSequenceLength then
 			currProgramLen = opt.maxSequenceLength
@@ -64,7 +64,7 @@ function testModel(allData,model,valInds)
 
 		local v,i = torch.max(netOutputProb,2)
 		local pred = i[{1,1}]
-		local gt = allData.label[valInds[k]]
+		local gt = allData.label[k]
 		if pred == gt then
 			correct = correct + 1;
 		end
