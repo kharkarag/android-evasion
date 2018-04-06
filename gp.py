@@ -128,7 +128,7 @@ class Experiment:
             feature_name = feature_names[new_feature]
 
             iterations = 0
-            while feature_name[0] == "S":
+            while feature_name[0] == "D":
                 new_feature = random.choice(list(benign_sample.features.keys()))
                 feature_name = feature_names[new_feature]
                 iterations += 1

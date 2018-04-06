@@ -19,6 +19,9 @@ random.seed(1)
 seed_dir = "seeds/opseq_seeds/test/"
 eval_dir = "deep-android/eval/"
 
+nop_set = ["00", "90", "9b", "a6", "ab", "91", "9c", "a7", "ac", "92", "9d", "a8", "ad", "93", "9e", "a9", "ae"]
+file_pattern = re.compile("M_.+_(\d+).opseq")
+
 mutation_rate = 0.5
 number_unfit = int(sample_size*mutation_rate)
 
@@ -68,14 +71,21 @@ class Experiment:
         os.chdir('..')
 
         output_list = list(filter(None, output.decode('UTF-8').split("\n")))
-        scores = output_list[1:-1]
+        filenames = output_list[:len(self.generation)]
+
+        generation_indexes = []
+        for i, name in enumerate(filenames):
+            index_match = file_pattern.match(name)
+            generation_indexes.append(int(index_match.group(1)))
+
+        scores = output_list[-(1+len(self.generation)):-1]
         score_split = [[float(score) for score in row.split()] for row in scores]
         print(score_split)
         # Each score is P(benign), P(malicious)
 
-        for i, score in enumerate(score_split):
+        for i, index in enumerate(generation_indexes):
             # self.generation[i].score = 1 - score[0]/score[1]
-            self.generation[i].score = score[1]
+            self.generation[index].score = score_split[i][1]
 
         return output
 
@@ -107,11 +117,27 @@ class Experiment:
         new_sample = copy.deepcopy(sample)
         num_features = len(new_sample.features)
 
-        num_added_nops = int(random.expovariate(1/math.log10(num_features)))
-        insertion_point = random.randrange(num_features + 1)
+        num_insertion_pts = int(random.expovariate(1/math.log(num_features)))
 
-        new_sample.features[insertion_point:insertion_point] = [0] * num_added_nops
-        feature_logger.info(insertion_point)
+        for i in range(num_insertion_pts):
+            insertion_line = random.randrange(num_features)
+            num_added_nops = int(random.expovariate(1/math.log(num_features)))
+            new_samples.added_feat
+
+            injection = []
+            for j in range(num_added_nops):
+                injection.append(random.choice(nop_set))
+
+            # insertion_point = 0
+            # print(insertion_line, num_features, len(new_sample.features[insertion_line]))
+            # if insertion_line < num_features:
+            insertion_point = random.randrange(len(new_sample.features[insertion_line]))
+            # else:
+                # new_sample.features.append("")
+            opcode_line = new_sample.features[insertion_line]
+
+            new_sample.features[insertion_line] = opcode_line[:insertion_point] + "".join(injection) + opcode_line[insertion_point:]
+            feature_logger.info((insertion_line, insertion_point))
 
         return new_sample
 
@@ -158,7 +184,7 @@ class Experiment:
             self.mutate_set(self.generation)
 
             num_evaded = sum([member.score < 0.5 for member in self.generation])
-            std_logger.info("Generation complete | Evaded: " + str(num_evaded) + " Mutations: " + str(len(self.generation[0].added_feat_indices)))
+            std_logger.info("Generation complete | Evaded: " + str(num_evaded) + " Mutations: " + str(len(self.generation[0].added_feat)))
 
             # if (current_gen+1) % 5 == 0:
             #     print([member.score for member in self.generation])
@@ -171,9 +197,9 @@ class Experiment:
             print("Experiment failed - max score: " + str(self.min_score))
         else:
             std_logger.warning("Experiment successful")
-            std_logger.info("Num features added: " + str(len(self.generation[0].added_feat_indices)))
+            std_logger.info("Num features added: " + str(len(self.generation[0].added_feat)))
             print("Completed generation", str(current_gen+1), ":", sum([member.score < 0.5 for member in self.generation]))
-            for feat in self.generation[0].added_feat_indices:
+            for feat in self.generation[0].added_feat:
                 evasion_logger.info(feat)
         # print([member.score for member in self.generation])
 
@@ -188,6 +214,7 @@ def experiment_set(seed):
     std_logger.info(["----- RUNNING EXPERIMENT ", i, "-----"])
     exp = Experiment()
     final_fitness = exp.run_experiment(util.load_opseq(opcodes, 1, seed_file), 300)
+    subprocess.run("rm deep-android/eval/*", shell=True)
     # print("Experiment " + str(i) + ": " + str(final_fitness))
 
 if __name__ == "__main__":

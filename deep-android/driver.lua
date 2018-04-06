@@ -55,4 +55,6 @@ print('--')
 print('time to complete test (s) :',time)
 --]]
 
+--print(allData.program)
+
 print(scores)
