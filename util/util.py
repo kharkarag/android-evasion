@@ -13,7 +13,6 @@ class Sample:
         self.added_feat = feature_type()
         self.added_feat.clear()
         self.cost = 0
-        self.fitness = 1
 
     def stringify(self):
         return_string = "Sample: " + str(self.sample_id)

@@ -24,9 +24,11 @@ mutation_rate = 0.5
 number_unfit = int(sample_size*mutation_rate)
 lambd = 0.01
 
+sample_restrict = "D"
+
 perm_cost, static_cost, dynamic_cost = 0.1, 1, 100
 
-header = "weighted_"
+header = "500_" + sample_restrict + "_"
 
 
 def setup_logger(name):
@@ -89,12 +91,15 @@ class Experiment:
         self.best_cumulative_extra.clear()
 
     def reset_generation(self, seed):
+        # Clear list
         self.generation = list()
 
+        # Set seed score
         with nostdout():
             p_labs, p_acc, p_vals = liblinearutil.predict([seed.label], [seed.features], model, '-b 1')
         seed.score = p_vals[0][1]
 
+        # Initialize BCE
         self.best_cumulative_extra = [seed] * sample_size
 
     def evaluate_fitness(self, samples, fitness_rate):
@@ -110,37 +115,36 @@ class Experiment:
                 del self.best_cumulative_extra[-1:]
             else:
                 samples[index] = self.best_cumulative_extra[0]
-        #     sorted_samples[new_sample_index] = gene_pool[random.randrange(gene_pool_size)]
 
         return samples
 
     def mutate_single(self, sample):
-        global benign_pool, feature_names
+        global benign_pool, feature_names, sample_restrict
         new_sample = copy.deepcopy(sample)
-
         benign_sample = random.choice(benign_pool)
 
-        # num_added_features = random.randrange(len(benign_sample.features.keys()))
-        # num_added_features = int(random.expovariate(1/math.log(len(benign_sample.features.keys()))))
         num_added_features = 1
         for i in range(num_added_features):
             new_feature = random.choice(list(benign_sample.features.keys()))
             feature_name = feature_names[new_feature]
 
-            iterations = 0
-            while feature_name[0] == "D":
+            if not sample_restrict == "A":
+                iterations = 0
+                while not feature_name[0] == sample_restrict:
+                    new_feature = random.choice(list(benign_sample.features.keys()))
+                    feature_name = feature_names[new_feature]
+                    iterations += 1
+                    if iterations > 10:
+                        benign_sample = random.choice(benign_pool)
+            else:
                 new_feature = random.choice(list(benign_sample.features.keys()))
                 feature_name = feature_names[new_feature]
-                iterations += 1
-                if iterations > 10:
-                    benign_sample = random.choice(benign_pool)
 
             new_sample.features[new_feature] = 1
             new_sample.added_feat[new_feature] = 1
             feature_logger.info(new_feature)
 
             # Assign feature cost
-
             if "PermRequired" in feature_name:
                 new_sample.cost += perm_cost
                 new_sample.perm_added += 1
@@ -159,10 +163,8 @@ class Experiment:
 
     def mutate_set(self, samples):
         mutation_set = random.sample(range(sample_size), number_unfit)
-        # mutation_set = range(sample_size - number_unfit, sample_size)
         for i in mutation_set:
             samples[i] = self.mutate_single(samples[i])
-
         return samples
 
     def classify(self, samples):
@@ -211,18 +213,13 @@ class Experiment:
                 + str(len(self.generation[0].added_feat.keys()))
             std_logger.info(generation_string)
 
-            # if (current_gen+1) % 1 == 0:
-                # print([(round(member.cost, 1), round(member.fitness, 2), len(member.added_feat), round(member.score, 2)) for member in self.generation])
-                # print()
-                # print("Completed generation", str(current_gen+1), ":",
-                #       sum([m.score < 0.5 for m in self.generation]))
             current_gen += 1
 
         if current_gen == max_gen:
             std_logger.warning("Experiment failed - max score: " + str(self.min_score))
             print("Experiment failed - max score: " + str(self.min_score))
         else:
-            std_logger.warning("Experiment successful")
+            std_logger.warning("Experiment successful: " + str(current_gen+1))
             std_logger.info("Num features added: " + str(len(self.generation[0].added_feat.keys())))
             print("Final generation",
                   str(current_gen+1), ":",

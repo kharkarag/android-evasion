@@ -196,7 +196,7 @@ class Experiment:
             std_logger.warning("Experiment failed - max score: " + str(self.min_score))
             print("Experiment failed - max score: " + str(self.min_score))
         else:
-            std_logger.warning("Experiment successful")
+            std_logger.warning("Experiment successful: " + str(current_gen+1))
             std_logger.info("Num features added: " + str(len(self.generation[0].added_feat)))
             print("Completed generation", str(current_gen+1), ":", sum([member.score < 0.5 for member in self.generation]))
             for feat in self.generation[0].added_feat:

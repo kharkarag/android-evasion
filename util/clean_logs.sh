@@ -8,7 +8,12 @@ fi
 rm output/logs/$1master.log
 rm output/logs/$1features.log
 rm output/logs/$1evasive.log
-rm output/logs/$1mutations.log
+if [ -e output/logs/$1mutations.log ]
+then
+    rm output/logs/$1mutations.log
+fi
+
+rm output/logs/generator/*
 
 if [ $# -gt 1 ] && [ $2 == '-cnn' ];
 then

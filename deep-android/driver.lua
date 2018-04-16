@@ -18,7 +18,7 @@ require 'testModel'
 cmd = torch.CmdLine()
 cmd:option('-useCUDA',false,'use CUDA optimisation')
 cmd:option('-dataDir','./eval/','directory with the android programs to classify')
-cmd:option('-modelPath','./model.th7','path to model to use for testing')
+cmd:option('-modelPath','./trainedNets/model.th7','path to model to use for testing')
 opt = cmd:parse(arg)
 
 --print('loading model from disk')
